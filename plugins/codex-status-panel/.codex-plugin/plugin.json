@@ -1,0 +1,23 @@
+{
+  "name": "codex-status-panel",
+  "version": "0.1.0",
+  "description": "Show current Codex five-hour and weekly usage limits with a concise summary of the active task context.",
+  "author": {
+    "name": "Local developer"
+  },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Codex Status Panel",
+    "shortDescription": "查看限额与当前任务上下文",
+    "longDescription": "在当前对话中显示 Codex 五小时和一周用量窗口、剩余额度、重置时间，以及当前打开任务的上下文摘要。",
+    "developerName": "Local developer",
+    "category": "Productivity",
+    "capabilities": ["Interactive", "Read"],
+    "defaultPrompt": [
+      "显示当前 Codex 限额和任务上下文。",
+      "刷新五小时与一周限额。",
+      "总结当前打开对话的上下文。"
+    ],
+    "brandColor": "#10A37F"
+  }
+}
