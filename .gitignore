@@ -1,2 +1,5 @@
 # Runtime diagnostics; generated automatically and not part of the plugin source.
 codex-status-overlay/watcher.log
+
+# Local-only engineering notes. Kept out of the public repository.
+IMPLEMENTATION_NOTES.local.md
