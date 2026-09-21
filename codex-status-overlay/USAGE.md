@@ -2,7 +2,7 @@
 
 双击 `Start-CodexStatusOverlay.cmd` 启动右下角悬浮面板，点击面板右上角的 `×` 退出。
 
-已启用随 Codex 自动启动：Windows 登录后由 Explorer 启动独立的 `CodexStatusWatcher.exe`。它只在检测到 Codex 真实可见、未被系统隐藏的主窗口时显示悬浮窗；关闭 Codex 窗口后，即使 Chromium 后台进程仍存在，也会关闭悬浮窗。用户手动关闭面板后，本次 Codex 窗口会话内不会再次弹出；重新打开 Codex 窗口后恢复自动显示。`Install-Autostart.ps1` 可重新安装该设置，`Remove-Autostart.ps1` 可完整取消；运行记录保存在 `watcher.log`。
+已启用随 Codex 自动启动：Windows 登录后由任务计划程序托管独立的 `CodexStatusWatcher.exe`，并在它异常退出时自动重启；注册表登录启动项作为后备。它只在检测到 Codex 真实可见、未被系统隐藏的主窗口时显示悬浮窗；关闭 Codex 窗口后，即使 Chromium 后台进程仍存在，也会关闭悬浮窗。用户手动关闭面板后，本次 Codex 窗口会话内不会再次弹出；重新打开 Codex 窗口后恢复自动显示。`Install-Autostart.ps1` 可重新安装该设置，`Remove-Autostart.ps1` 可完整取消；运行记录保存在 `watcher.log`。
 
 将面板拖到屏幕左侧或右侧 32 像素范围内即可停靠。靠边时绿色提示条不会提前出现；鼠标移开 650 毫秒后，面板会带过渡动画收入屏幕边缘并固定保留 32 像素。动画完成后，这 32 像素区域只绘制当前上下文占用比例对应的绿色进度条，不保留面板背景或其他内容；将鼠标移到该区域会带动画完整展开。把面板拖离边缘即可取消自动隐藏。
 
