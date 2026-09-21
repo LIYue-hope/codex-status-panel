@@ -2,9 +2,28 @@ $ErrorActionPreference = 'Stop'
 
 $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $watcherPath = Join-Path $scriptRoot 'CodexStatusWatcher.exe'
+$providerPath = Join-Path $scriptRoot 'read_status.py'
 
 if (-not (Test-Path -LiteralPath $watcherPath)) {
     throw '未找到 Codex 状态悬浮窗 EXE 监视器。'
+}
+
+$bundledPython = Join-Path $env:USERPROFILE '.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe'
+$pythonPath = if (Test-Path -LiteralPath $bundledPython) {
+    $bundledPython
+} elseif (Get-Command py.exe -ErrorAction SilentlyContinue) {
+    (Get-Command py.exe).Source
+} elseif (Get-Command python.exe -ErrorAction SilentlyContinue) {
+    (Get-Command python.exe).Source
+} else {
+    throw '未找到 Python，无法初始化历史用量记录。'
+}
+
+# Create the installation baseline before the watcher starts. Existing rollout
+# bytes are checkpointed but never counted, so history begins at installation.
+$historyResult = & $pythonPath $providerPath --initialize-history | ConvertFrom-Json
+if (-not $historyResult.ok) {
+    throw ([string]$historyResult.error)
 }
 
 # The original PowerShell scheduled task could be terminated with 0xC000013A.
@@ -61,5 +80,6 @@ catch {
 }
 
 if ($taskInstalled) {
-    Write-Output 'Codex 状态悬浮窗已注册为登录启动；任务计划程序将托管并自动重启 EXE 监视器。'
+    $historyTime = [DateTimeOffset]::FromUnixTimeSeconds([int64]$historyResult.installed_at).ToLocalTime().ToString('yyyy-MM-dd HH:mm:ss')
+    Write-Output ('Codex 状态悬浮窗已注册为登录启动；历史用量从 ' + $historyTime + ' 开始记录。')
 }

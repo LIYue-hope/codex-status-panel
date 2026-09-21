@@ -1,6 +1,6 @@
 {
   "name": "codex-status-panel",
-  "version": "0.1.0",
+  "version": "0.1.0+codex.20260921154948",
   "description": "Show current Codex five-hour and weekly usage limits with a concise summary of the active task context.",
   "author": {
     "name": "Local developer"
