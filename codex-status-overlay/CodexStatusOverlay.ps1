@@ -30,14 +30,58 @@ $pythonPath = if (Test-Path -LiteralPath $bundledPython) {
 [xml]$xaml = @'
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Width="344" Height="312" WindowStyle="None" AllowsTransparency="True"
+        Width="344" Height="336" WindowStyle="None" AllowsTransparency="True"
         Background="Transparent" Topmost="True" ShowInTaskbar="False"
-        ResizeMode="NoResize" FontFamily="Microsoft YaHei UI">
+        ResizeMode="NoResize" FontFamily="Segoe UI Variable Text, Segoe UI, Microsoft YaHei UI"
+        TextOptions.TextFormattingMode="Display" TextOptions.TextRenderingMode="Auto">
+  <Window.Resources>
+    <Style x:Key="HistoryDatePickerStyle" TargetType="DatePicker">
+      <Setter Property="Height" Value="28"/>
+      <Setter Property="FontSize" Value="11"/>
+      <Setter Property="Foreground" Value="#FF111318"/>
+      <Setter Property="Background" Value="#FF25292F"/>
+      <Setter Property="BorderBrush" Value="#FF3A4048"/>
+      <Setter Property="BorderThickness" Value="1"/>
+      <Setter Property="Padding" Value="6,0"/>
+      <Setter Property="VerticalContentAlignment" Value="Center"/>
+    </Style>
+    <Style x:Key="HistoryMetricCardStyle" TargetType="Border">
+      <Setter Property="Background" Value="#B31F2329"/>
+      <Setter Property="BorderBrush" Value="#243F4854"/>
+      <Setter Property="BorderThickness" Value="1"/>
+      <Setter Property="CornerRadius" Value="8"/>
+      <Setter Property="Padding" Value="10,4"/>
+    </Style>
+    <Style x:Key="HistoryApplyButtonStyle" TargetType="Button">
+      <Setter Property="Foreground" Value="#FFFFFFFF"/>
+      <Setter Property="Background" Value="#FF10A37F"/>
+      <Setter Property="FontSize" Value="11"/>
+      <Setter Property="FontWeight" Value="SemiBold"/>
+      <Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <Border x:Name="ButtonSurface" Background="{TemplateBinding Background}" CornerRadius="6">
+              <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="ButtonSurface" Property="Background" Value="#FF18B88F"/>
+              </Trigger>
+              <Trigger Property="IsPressed" Value="True">
+                <Setter TargetName="ButtonSurface" Property="Background" Value="#FF0D8E70"/>
+              </Trigger>
+              <Trigger Property="IsEnabled" Value="False">
+                <Setter TargetName="ButtonSurface" Property="Opacity" Value="0.45"/>
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+  </Window.Resources>
   <Grid>
     <Border x:Name="PanelBorder" CornerRadius="16" Background="#F2181B20" BorderBrush="#3AFFFFFF" BorderThickness="1" Padding="16">
-      <Border.Effect>
-        <DropShadowEffect Color="#000000" BlurRadius="22" ShadowDepth="4" Opacity="0.45"/>
-      </Border.Effect>
       <Grid>
       <Grid.RowDefinitions>
         <RowDefinition Height="34"/>
@@ -46,10 +90,18 @@ $pythonPath = if (Test-Path -LiteralPath $bundledPython) {
 
       <Grid x:Name="Header" Grid.Row="0" Background="Transparent">
         <StackPanel Orientation="Horizontal">
-          <Button x:Name="StatusTabButton" Content="Codex 状态" Foreground="#FFF5F7FA" Background="Transparent"
-                  BorderThickness="0" FontSize="15" FontWeight="SemiBold" Padding="0,0,14,0" Cursor="Hand"/>
-          <Button x:Name="HistoryTabButton" Content="历史用量" Foreground="#FF788391" Background="Transparent"
-                  BorderThickness="0" FontSize="13" Padding="10,0" Cursor="Hand"/>
+          <Grid Margin="0,0,8,0">
+            <Button x:Name="StatusTabButton" Content="Codex 状态" Foreground="#FFF5F7FA" Background="Transparent"
+                    BorderThickness="0" FontSize="13" FontWeight="SemiBold" Padding="0,0,8,3" Cursor="Hand"/>
+            <Border x:Name="StatusTabIndicator" Height="2" CornerRadius="1" Background="#FF10A37F"
+                    HorizontalAlignment="Stretch" VerticalAlignment="Bottom" Margin="0,0,8,0"/>
+          </Grid>
+          <Grid>
+            <Button x:Name="HistoryTabButton" Content="历史用量" Foreground="#FF828B98" Background="Transparent"
+                    BorderThickness="0" FontSize="13" FontWeight="SemiBold" Padding="8,0,8,3" Cursor="Hand"/>
+            <Border x:Name="HistoryTabIndicator" Height="2" CornerRadius="1" Background="#FF10A37F"
+                    HorizontalAlignment="Stretch" VerticalAlignment="Bottom" Margin="8,0" Visibility="Collapsed"/>
+          </Grid>
         </StackPanel>
         <Button x:Name="CloseButton" Content="×" Width="28" Height="28" HorizontalAlignment="Right"
                 Foreground="#FFB7BEC8" Background="Transparent" BorderThickness="0" FontSize="18" Cursor="Hand"/>
@@ -101,61 +153,69 @@ $pythonPath = if (Test-Path -LiteralPath $bundledPython) {
 
       <Grid x:Name="HistoryView" Grid.Row="1" Visibility="Collapsed" Margin="0,4,0,0">
         <Grid.RowDefinitions>
-          <RowDefinition Height="36"/>
-          <RowDefinition Height="62"/>
-          <RowDefinition Height="82"/>
-          <RowDefinition Height="94"/>
-          <RowDefinition Height="Auto"/>
+          <RowDefinition Height="24"/>
+          <RowDefinition Height="64"/>
+          <RowDefinition Height="70"/>
+          <RowDefinition Height="88"/>
+          <RowDefinition Height="*"/>
         </Grid.RowDefinitions>
         <TextBlock x:Name="HistoryInstalledText" Grid.Row="0" Text="正在初始化本地记录…"
-                   Foreground="#FF8F99A8" FontSize="10" VerticalAlignment="Top"/>
-        <Grid Grid.Row="1">
-          <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="*"/>
-            <ColumnDefinition Width="14"/>
-            <ColumnDefinition Width="*"/>
-            <ColumnDefinition Width="54"/>
-          </Grid.ColumnDefinitions>
-          <StackPanel Grid.Column="0">
-            <TextBlock Text="开始日期" Foreground="#FFC7CDD6" FontSize="10" Margin="0,0,0,4"/>
-            <DatePicker x:Name="HistoryStartDate" FontSize="11" Height="28"/>
-          </StackPanel>
-          <TextBlock Grid.Column="1" Text="—" Foreground="#FF788391" VerticalAlignment="Bottom" Margin="2,0,2,8"/>
-          <StackPanel Grid.Column="2">
-            <TextBlock Text="结束日期" Foreground="#FFC7CDD6" FontSize="10" Margin="0,0,0,4"/>
-            <DatePicker x:Name="HistoryEndDate" FontSize="11" Height="28"/>
-          </StackPanel>
-          <Button x:Name="HistoryApplyButton" Grid.Column="3" Content="查询" Height="28" Margin="8,20,0,0"
-                  Foreground="#FFFFFFFF" Background="#FF10A37F" BorderThickness="0" Cursor="Hand"/>
-        </Grid>
-        <Border Grid.Row="2" Background="#162FAE8F" CornerRadius="10" Padding="12,9" Margin="0,6,0,8">
-          <StackPanel>
-            <TextBlock Text="总 Token 用量" Foreground="#FFAAB3BE" FontSize="10"/>
-            <TextBlock x:Name="HistoryTotalText" Text="0" Foreground="#FFF5F7FA" FontSize="26" FontWeight="SemiBold"/>
-          </StackPanel>
+                   Foreground="#FF8F99A8" FontSize="10.5" VerticalAlignment="Top"/>
+        <Border Grid.Row="1" Background="#991F2329" BorderBrush="#243F4854" BorderThickness="1"
+                CornerRadius="10" Padding="10,5" Margin="0,0,0,6">
+          <Grid>
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="*"/>
+              <ColumnDefinition Width="12"/>
+              <ColumnDefinition Width="*"/>
+              <ColumnDefinition Width="48"/>
+            </Grid.ColumnDefinitions>
+            <StackPanel Grid.Column="0">
+              <TextBlock Text="开始" Foreground="#FF8F99A8" FontSize="9.5" Margin="2,0,0,3"/>
+              <DatePicker x:Name="HistoryStartDate" Style="{StaticResource HistoryDatePickerStyle}"
+                          ToolTip="点击日期或日历图标选择开始日期"/>
+            </StackPanel>
+            <TextBlock Grid.Column="1" Text="–" Foreground="#FF69727E" FontSize="12"
+                       VerticalAlignment="Bottom" HorizontalAlignment="Center" Margin="0,0,0,7"/>
+            <StackPanel Grid.Column="2">
+              <TextBlock Text="结束" Foreground="#FF8F99A8" FontSize="9.5" Margin="2,0,0,3"/>
+              <DatePicker x:Name="HistoryEndDate" Style="{StaticResource HistoryDatePickerStyle}"
+                          ToolTip="点击日期或日历图标选择结束日期"/>
+            </StackPanel>
+            <Button x:Name="HistoryApplyButton" Grid.Column="3" Content="查询" Height="28" Margin="8,15,0,0"
+                    Style="{StaticResource HistoryApplyButtonStyle}"/>
+          </Grid>
         </Border>
-        <Grid Grid.Row="3" Margin="4,2,4,0">
+        <Border Grid.Row="2" Background="#182FAE8F" BorderBrush="#343FC3A0" BorderThickness="1"
+                CornerRadius="10" Padding="12,6" Margin="0,0,0,6">
+          <Grid>
+            <StackPanel VerticalAlignment="Center">
+              <TextBlock Text="总 Token 用量" Foreground="#FFA8B0BB" FontSize="10"/>
+              <TextBlock x:Name="HistoryTotalText" Text="0" Foreground="#FFF5F7FA" FontSize="23"
+                         FontWeight="SemiBold"/>
+            </StackPanel>
+            <Border Width="8" Height="8" CornerRadius="4" Background="#FF10A37F"
+                    HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,3,3,0"/>
+          </Grid>
+        </Border>
+        <Grid Grid.Row="3">
           <Grid.RowDefinitions><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
           <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions>
-          <StackPanel Grid.Row="0" Grid.Column="0">
-            <TextBlock Text="输入" Foreground="#FF7F8996" FontSize="10"/>
-            <TextBlock x:Name="HistoryInputText" Text="0" Foreground="#FFE2E6EB" FontSize="13"/>
-          </StackPanel>
-          <StackPanel Grid.Row="0" Grid.Column="1">
-            <TextBlock Text="其中缓存输入" Foreground="#FF7F8996" FontSize="10"/>
-            <TextBlock x:Name="HistoryCachedText" Text="0" Foreground="#FFE2E6EB" FontSize="13"/>
-          </StackPanel>
-          <StackPanel Grid.Row="1" Grid.Column="0">
-            <TextBlock Text="输出" Foreground="#FF7F8996" FontSize="10"/>
-            <TextBlock x:Name="HistoryOutputText" Text="0" Foreground="#FFE2E6EB" FontSize="13"/>
-          </StackPanel>
-          <StackPanel Grid.Row="1" Grid.Column="1">
-            <TextBlock Text="其中推理输出" Foreground="#FF7F8996" FontSize="10"/>
-            <TextBlock x:Name="HistoryReasoningText" Text="0" Foreground="#FFE2E6EB" FontSize="13"/>
-          </StackPanel>
+          <Border Grid.Row="0" Grid.Column="0" Style="{StaticResource HistoryMetricCardStyle}" Margin="0,0,4,3">
+            <StackPanel VerticalAlignment="Center"><TextBlock Text="输入" Foreground="#FF828B98" FontSize="9"/><TextBlock x:Name="HistoryInputText" Text="0" Foreground="#FFE8EAED" FontSize="12.5" FontWeight="SemiBold"/></StackPanel>
+          </Border>
+          <Border Grid.Row="0" Grid.Column="1" Style="{StaticResource HistoryMetricCardStyle}" Margin="4,0,0,3">
+            <StackPanel VerticalAlignment="Center"><TextBlock Text="缓存输入" Foreground="#FF828B98" FontSize="9"/><TextBlock x:Name="HistoryCachedText" Text="0" Foreground="#FFE8EAED" FontSize="12.5" FontWeight="SemiBold"/></StackPanel>
+          </Border>
+          <Border Grid.Row="1" Grid.Column="0" Style="{StaticResource HistoryMetricCardStyle}" Margin="0,3,4,0">
+            <StackPanel VerticalAlignment="Center"><TextBlock Text="输出" Foreground="#FF828B98" FontSize="9"/><TextBlock x:Name="HistoryOutputText" Text="0" Foreground="#FFE8EAED" FontSize="12.5" FontWeight="SemiBold"/></StackPanel>
+          </Border>
+          <Border Grid.Row="1" Grid.Column="1" Style="{StaticResource HistoryMetricCardStyle}" Margin="4,3,0,0">
+            <StackPanel VerticalAlignment="Center"><TextBlock Text="推理输出" Foreground="#FF828B98" FontSize="9"/><TextBlock x:Name="HistoryReasoningText" Text="0" Foreground="#FFE8EAED" FontSize="12.5" FontWeight="SemiBold"/></StackPanel>
+          </Border>
         </Grid>
         <TextBlock x:Name="HistoryMetaText" Grid.Row="4" Text="仅统计安装后的模型调用"
-                   Foreground="#FF646D79" FontSize="9" HorizontalAlignment="Right" VerticalAlignment="Bottom"/>
+                   Foreground="#FF69727E" FontSize="9" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,5,0,0"/>
       </Grid>
       </Grid>
     </Border>
@@ -171,7 +231,7 @@ $pythonPath = if (Test-Path -LiteralPath $bundledPython) {
 $reader = New-Object System.Xml.XmlNodeReader $xaml
 $window = [Windows.Markup.XamlReader]::Load($reader)
 $names = @(
-    'PanelBorder','Header','StatusTabButton','HistoryTabButton','CloseButton','StatusView','HistoryView',
+    'PanelBorder','Header','StatusTabButton','HistoryTabButton','StatusTabIndicator','HistoryTabIndicator','CloseButton','StatusView','HistoryView',
     'ThreadTitle','ThreadMeta','ContextText','ContextBar','ContextDetail','FiveHourText','FiveHourBar',
     'FiveHourReset','WeekText','WeekBar','WeekReset','StatusText','HistoryInstalledText','HistoryStartDate',
     'HistoryEndDate','HistoryApplyButton','HistoryTotalText','HistoryInputText','HistoryCachedText',
@@ -236,6 +296,28 @@ function Format-TokenCount([int64]$value) {
 function Convert-LocalDateToEpoch([DateTime]$date) {
     $localDate = [DateTime]::SpecifyKind($date.Date, [DateTimeKind]::Local)
     return [DateTimeOffset]::new($localDate).ToUnixTimeSeconds()
+}
+
+function Open-HistoryDatePickerFromText($datePicker) {
+    $textBox = $datePicker.Template.FindName('PART_TextBox', $datePicker)
+    if ($null -ne $textBox -and $textBox.IsMouseOver) {
+        $datePicker.IsDropDownOpen = $true
+    }
+}
+
+function Hide-HistoryDatePickerButton($datePicker) {
+    [void]$datePicker.ApplyTemplate()
+    $button = $datePicker.Template.FindName('PART_Button', $datePicker)
+    if ($null -eq $button) { return }
+
+    $button.Visibility = 'Collapsed'
+    $parent = [Windows.Media.VisualTreeHelper]::GetParent($button)
+    if ($parent -is [Windows.Controls.Grid]) {
+        $column = [Windows.Controls.Grid]::GetColumn($button)
+        if ($column -ge 0 -and $column -lt $parent.ColumnDefinitions.Count) {
+            $parent.ColumnDefinitions[$column].Width = [Windows.GridLength]::new(0)
+        }
+    }
 }
 
 function Apply-HistoryDateRange {
@@ -335,19 +417,19 @@ function Set-PanelView([string]$viewName) {
     if ($viewName -eq 'History') {
         $StatusView.Visibility = 'Collapsed'
         $HistoryView.Visibility = 'Visible'
-        $StatusTabButton.Foreground = [Windows.Media.BrushConverter]::new().ConvertFromString('#FF788391')
+        $StatusTabButton.Foreground = [Windows.Media.BrushConverter]::new().ConvertFromString('#FF828B98')
         $HistoryTabButton.Foreground = [Windows.Media.BrushConverter]::new().ConvertFromString('#FFF5F7FA')
-        $StatusTabButton.FontSize = 13
-        $HistoryTabButton.FontSize = 15
-        $window.Height = 382
+        $StatusTabIndicator.Visibility = 'Collapsed'
+        $HistoryTabIndicator.Visibility = 'Visible'
+        $window.Height = 336
     } else {
         $StatusView.Visibility = 'Visible'
         $HistoryView.Visibility = 'Collapsed'
         $StatusTabButton.Foreground = [Windows.Media.BrushConverter]::new().ConvertFromString('#FFF5F7FA')
-        $HistoryTabButton.Foreground = [Windows.Media.BrushConverter]::new().ConvertFromString('#FF788391')
-        $StatusTabButton.FontSize = 15
-        $HistoryTabButton.FontSize = 13
-        $window.Height = 312
+        $HistoryTabButton.Foreground = [Windows.Media.BrushConverter]::new().ConvertFromString('#FF828B98')
+        $StatusTabIndicator.Visibility = 'Visible'
+        $HistoryTabIndicator.Visibility = 'Collapsed'
+        $window.Height = 336
     }
     $window.Top = [Math]::Max($workArea.Top, [Math]::Min($oldBottom - $window.Height, $workArea.Bottom - $window.Height))
 }
@@ -476,6 +558,10 @@ $Header.Add_MouseLeftButtonDown({
 })
 $StatusTabButton.Add_Click({ Set-PanelView 'Status' })
 $HistoryTabButton.Add_Click({ Set-PanelView 'History' })
+$HistoryStartDate.Add_Loaded({ Hide-HistoryDatePickerButton $HistoryStartDate })
+$HistoryEndDate.Add_Loaded({ Hide-HistoryDatePickerButton $HistoryEndDate })
+$HistoryStartDate.Add_PreviewMouseLeftButtonUp({ Open-HistoryDatePickerFromText $HistoryStartDate })
+$HistoryEndDate.Add_PreviewMouseLeftButtonUp({ Open-HistoryDatePickerFromText $HistoryEndDate })
 $HistoryApplyButton.Add_Click({
     if (Apply-HistoryDateRange) { Update-Panel }
 })
