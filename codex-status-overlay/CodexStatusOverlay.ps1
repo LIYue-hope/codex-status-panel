@@ -35,6 +35,23 @@ $pythonPath = if (Test-Path -LiteralPath $bundledPython) {
         ResizeMode="NoResize" FontFamily="Segoe UI Variable Text, Segoe UI, Microsoft YaHei UI"
         TextOptions.TextFormattingMode="Display" TextOptions.TextRenderingMode="Auto">
   <Window.Resources>
+    <Style x:Key="PanelTabButtonStyle" TargetType="Button">
+      <Setter Property="Background" Value="Transparent"/>
+      <Setter Property="BorderThickness" Value="0"/>
+      <Setter Property="FontSize" Value="13"/>
+      <Setter Property="FontWeight" Value="SemiBold"/>
+      <Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <Border Background="Transparent" Padding="{TemplateBinding Padding}">
+              <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                VerticalAlignment="{TemplateBinding VerticalContentAlignment}"/>
+            </Border>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
     <Style x:Key="HistoryDatePickerStyle" TargetType="DatePicker">
       <Setter Property="Height" Value="28"/>
       <Setter Property="FontSize" Value="11"/>
@@ -91,14 +108,14 @@ $pythonPath = if (Test-Path -LiteralPath $bundledPython) {
       <Grid x:Name="Header" Grid.Row="0" Background="Transparent">
         <StackPanel Orientation="Horizontal">
           <Grid Margin="0,0,8,0">
-            <Button x:Name="StatusTabButton" Content="Codex 状态" Foreground="#FFF5F7FA" Background="Transparent"
-                    BorderThickness="0" FontSize="13" FontWeight="SemiBold" Padding="0,0,8,3" Cursor="Hand"/>
+            <Button x:Name="StatusTabButton" Content="Codex 状态" Foreground="#FFF5F7FA"
+                    Style="{StaticResource PanelTabButtonStyle}" Padding="0,0,8,3"/>
             <Border x:Name="StatusTabIndicator" Height="2" CornerRadius="1" Background="#FF10A37F"
                     HorizontalAlignment="Stretch" VerticalAlignment="Bottom" Margin="0,0,8,0"/>
           </Grid>
           <Grid>
-            <Button x:Name="HistoryTabButton" Content="历史用量" Foreground="#FF828B98" Background="Transparent"
-                    BorderThickness="0" FontSize="13" FontWeight="SemiBold" Padding="8,0,8,3" Cursor="Hand"/>
+            <Button x:Name="HistoryTabButton" Content="历史用量" Foreground="#FF828B98"
+                    Style="{StaticResource PanelTabButtonStyle}" Padding="8,0,8,3"/>
             <Border x:Name="HistoryTabIndicator" Height="2" CornerRadius="1" Background="#FF10A37F"
                     HorizontalAlignment="Stretch" VerticalAlignment="Bottom" Margin="8,0" Visibility="Collapsed"/>
           </Grid>
@@ -343,8 +360,9 @@ function Update-HistoryView($history, $historyError) {
     $installedAt = [DateTimeOffset]::FromUnixTimeSeconds([int64]$history.installed_at).ToLocalTime()
     $HistoryInstalledText.Text = '自 ' + $installedAt.ToString('yyyy-MM-dd HH:mm') + ' 安装后开始记录'
     if (-not $script:HistoryRangeInitialized) {
-        $HistoryStartDate.SelectedDate = $installedAt.Date
-        $HistoryEndDate.SelectedDate = (Get-Date).Date
+        $today = (Get-Date).Date
+        $HistoryStartDate.SelectedDate = $today
+        $HistoryEndDate.SelectedDate = $today
         $script:HistoryRangeInitialized = $true
         [void](Apply-HistoryDateRange)
     }
