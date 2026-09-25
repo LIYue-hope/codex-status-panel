@@ -6,7 +6,10 @@ import re
 import sqlite3
 import subprocess
 import sys
+import threading
 import time
+from queue import Empty, Queue
+from decimal import Decimal, InvalidOperation
 from datetime import datetime
 from pathlib import Path
 
@@ -337,6 +340,138 @@ def latest_rate_limit_event(rollout_paths):
     return newest
 
 
+def reset_credit_count(rate_limits):
+    """Return the available reset-card count from a rate-limit snapshot."""
+    credits = rate_limits.get("credits") if isinstance(rate_limits, dict) else None
+    if not isinstance(credits, dict) or credits.get("has_credits") is False:
+        return 0
+
+    balance = credits.get("balance")
+    if isinstance(balance, bool) or balance is None:
+        return 0
+    try:
+        count = int(Decimal(str(balance)))
+    except (InvalidOperation, ValueError, TypeError, OverflowError):
+        return 0
+    return max(0, count)
+
+
+def app_server_command():
+    """Prefer the complete app-server binary bundled with Codex Desktop."""
+    local_app_data = Path(os.environ.get("LOCALAPPDATA") or (Path.home() / "AppData" / "Local"))
+    desktop_bin = local_app_data / "OpenAI" / "Codex" / "bin"
+    candidates = [path for path in desktop_bin.glob("*/codex.exe") if path.is_file()]
+    if candidates:
+        latest = max(candidates, key=lambda path: path.stat().st_mtime_ns)
+        return [str(latest), "app-server", "--stdio"]
+    # Older installations may instead expose a managed app-server daemon.
+    return ["codex", "app-server", "proxy"]
+
+
+def app_server_response_queue(stream):
+    """Copy an app-server stream into one queue shared by the full RPC session."""
+    lines = Queue()
+
+    def copy_lines():
+        for line in iter(stream.readline, ""):
+            lines.put(line)
+
+    threading.Thread(target=copy_lines, daemon=True).start()
+    return lines
+
+
+def read_app_server_response(lines, request_id, timeout_seconds=4):
+    """Read a JSON-RPC response without allowing a dead app-server to hang UI refreshes."""
+    deadline = time.monotonic() + timeout_seconds
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError("Codex 本地 app-server 响应超时")
+        try:
+            line = lines.get(timeout=remaining)
+        except Empty as error:
+            raise TimeoutError("Codex 本地 app-server 响应超时") from error
+        try:
+            response = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if response.get("id") == request_id:
+            return response
+
+
+def read_live_reset_credit_count():
+    """Read the account's banked reset count through Codex's local app server."""
+    messages = (
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "clientInfo": {"name": "codex-status-overlay", "version": "1.0"},
+                "capabilities": {},
+            },
+        },
+        {"jsonrpc": "2.0", "method": "initialized", "params": {}},
+        {
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "account/rateLimits/read",
+            # Background polls only need the aggregate count, not the credit
+            # titles, IDs, descriptions, or expiry details.
+            "params": {"excludeResetCreditDetails": True},
+        },
+    )
+    try:
+        process = subprocess.Popen(
+            app_server_command(),
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+    except OSError:
+        return None, "无法启动 Codex 本地 app-server"
+
+    try:
+        assert process.stdin is not None and process.stdout is not None
+
+        def send(message):
+            process.stdin.write(json.dumps(message, separators=(",", ":")) + "\n")
+            process.stdin.flush()
+
+        responses = app_server_response_queue(process.stdout)
+        send(messages[0])
+        initialization = read_app_server_response(responses, 1)
+        if "error" in initialization:
+            return None, "Codex 本地 app-server 初始化失败"
+        send(messages[1])
+        send(messages[2])
+        response = read_app_server_response(responses, 2)
+        if "error" in response:
+            return None, "实时账户查询被拒绝"
+        summary = (response.get("result") or {}).get("rateLimitResetCredits")
+        if not isinstance(summary, dict):
+            return None, "实时账户响应未包含重置卡数量"
+        count = summary.get("availableCount")
+        if isinstance(count, bool) or not isinstance(count, (int, float)):
+            return None, "实时账户响应中的重置卡数量无效"
+        return max(0, int(count)), None
+    except (OSError, TimeoutError, ValueError):
+        return None, "无法连接 Codex 本地 app-server"
+    finally:
+        try:
+            process.stdin.close()
+        except (AttributeError, OSError):
+            pass
+        try:
+            process.terminate()
+            process.wait(timeout=1)
+        except (AttributeError, OSError, subprocess.SubprocessError):
+            pass
+
+
 def active_window_title():
     helper = Path(__file__).with_name("get_active_codex_title.exe")
     if not helper.is_file():
@@ -422,6 +557,7 @@ def parse_arguments(argv=None):
     parser.add_argument("--initialize-history", action="store_true")
     parser.add_argument("--history-start", type=float)
     parser.add_argument("--history-end", type=float)
+    parser.add_argument("--read-live-reset-credits", action="store_true")
     return parser.parse_args(argv)
 
 
@@ -546,6 +682,9 @@ def main(argv=None):
         },
         "context": None,
         "limits": [],
+        "reset_credits": 0,
+        "reset_credits_source": "local_snapshot",
+        "live_reset_credits_error": None,
         "history": history,
         "history_error": history_error,
     }
@@ -569,6 +708,7 @@ def main(argv=None):
     if limits_event:
         payload = limits_event["payload"]
         rate_limits = payload.get("rate_limits") or {}
+        result["reset_credits"] = reset_credit_count(rate_limits)
         for key in ("primary", "secondary"):
             window = rate_limits.get(key) or {}
             minutes = window.get("window_minutes")
@@ -583,6 +723,15 @@ def main(argv=None):
                     "resets_at": window.get("resets_at"),
                 }
             )
+
+    if args.read_live_reset_credits:
+        live_count, live_error = read_live_reset_credit_count()
+        if live_count is None:
+            result["reset_credits_source"] = "live_account_unavailable"
+            result["live_reset_credits_error"] = live_error
+        else:
+            result["reset_credits"] = live_count
+            result["reset_credits_source"] = "live_account"
 
     emit(result)
     return 0

@@ -1,10 +1,12 @@
 import importlib.util
+import io
 import json
 import os
 import shutil
 import unittest
 import uuid
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 
@@ -83,6 +85,7 @@ class UsageHistoryTests(unittest.TestCase):
         self.assertEqual(summary["total_tokens"], 120)
         connection.close()
 
+
     def test_incomplete_json_line_is_imported_after_newline_arrives(self):
         connection, _, installed_at, _ = read_status.open_history_database(
             self.codex_home, now=1767225601
@@ -96,6 +99,52 @@ class UsageHistoryTests(unittest.TestCase):
             handle.write("\n")
         self.assertEqual(read_status.sync_usage_history(connection, self.codex_home, installed_at), 1)
         connection.close()
+
+
+class ResetCreditTests(unittest.TestCase):
+    def test_reads_available_reset_cards_from_credit_balance(self):
+        self.assertEqual(
+            read_status.reset_credit_count(
+                {"credits": {"has_credits": True, "balance": "3"}}
+            ),
+            3,
+        )
+
+    def test_missing_or_unavailable_credits_are_zero(self):
+        for rate_limits in (
+            {},
+            {"credits": {}},
+            {"credits": {"has_credits": False, "balance": "4"}},
+            {"credits": {"has_credits": True, "balance": "not-a-number"}},
+            {"credits": {"has_credits": True, "balance": -1}},
+        ):
+            with self.subTest(rate_limits=rate_limits):
+                self.assertEqual(read_status.reset_credit_count(rate_limits), 0)
+
+    @mock.patch.object(read_status.subprocess, "Popen")
+    def test_reads_live_reset_cards_from_local_app_server(self, popen):
+        process = SimpleNamespace(
+            stdin=mock.Mock(),
+            stdout=io.StringIO(
+                '{"jsonrpc":"2.0","id":1,"result":{}}\n'
+                '{"jsonrpc":"2.0","id":2,"result":{"rateLimitResetCredits":{"availableCount":2}}}\n'
+            ),
+            terminate=mock.Mock(),
+            wait=mock.Mock(),
+        )
+        popen.return_value = process
+
+        count, error = read_status.read_live_reset_credit_count()
+
+        self.assertEqual((count, error), (2, None))
+        sent_messages = [json.loads(call.args[0]) for call in process.stdin.write.call_args_list]
+        self.assertEqual(sent_messages[-1]["method"], "account/rateLimits/read")
+        self.assertTrue(sent_messages[-1]["params"]["excludeResetCreditDetails"])
+
+    @mock.patch.object(read_status.subprocess, "Popen", side_effect=OSError())
+    def test_live_reset_cards_report_unavailable_when_app_server_cannot_start(self, popen):
+
+        self.assertEqual(read_status.read_live_reset_credit_count(), (None, "无法启动 Codex 本地 app-server"))
 
 
 if __name__ == "__main__":

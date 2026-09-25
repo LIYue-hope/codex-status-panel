@@ -180,6 +180,12 @@ $pythonPath = if (Test-Path -LiteralPath $bundledPython) {
             <Border x:Name="HistoryTabIndicator" Height="2" CornerRadius="1" Background="#FF10A37F"
                     HorizontalAlignment="Stretch" VerticalAlignment="Bottom" Margin="8,0" Visibility="Collapsed"/>
           </Grid>
+          <Grid>
+            <Button x:Name="SettingsTabButton" Content="设置" Foreground="{DynamicResource TextMutedBrush}"
+                    Style="{StaticResource PanelTabButtonStyle}" Padding="8,0,8,3"/>
+            <Border x:Name="SettingsTabIndicator" Height="2" CornerRadius="1" Background="#FF10A37F"
+                    HorizontalAlignment="Stretch" VerticalAlignment="Bottom" Margin="8,0" Visibility="Collapsed"/>
+          </Grid>
         </StackPanel>
         <Button x:Name="CloseButton" Content="×" Width="28" Height="28" HorizontalAlignment="Right"
                 Foreground="{DynamicResource TextSecondaryBrush}" Background="Transparent" BorderThickness="0" FontSize="18" Cursor="Hand"/>
@@ -218,7 +224,7 @@ $pythonPath = if (Test-Path -LiteralPath $bundledPython) {
         </StackPanel>
         <StackPanel Grid.Row="3">
           <DockPanel>
-            <TextBlock Text="一周限额" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11"/>
+            <TextBlock x:Name="WeekLabel" Text="一周限额（有0次重置）" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11"/>
             <TextBlock x:Name="WeekText" Text="等待数据" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="11" HorizontalAlignment="Right"/>
           </DockPanel>
           <ProgressBar x:Name="WeekBar" Minimum="0" Maximum="100" Value="0" Height="8" Margin="0,8,0,0"
@@ -295,6 +301,21 @@ $pythonPath = if (Test-Path -LiteralPath $bundledPython) {
         <TextBlock x:Name="HistoryMetaText" Grid.Row="4" Text="仅统计安装后的模型调用"
                    Foreground="{DynamicResource TextFaintBrush}" FontSize="9" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,5,0,0"/>
       </Grid>
+      <Grid x:Name="SettingsView" Grid.Row="1" Visibility="Collapsed" Margin="0,4,0,0">
+        <Grid.RowDefinitions>
+          <RowDefinition Height="Auto"/>
+          <RowDefinition Height="Auto"/>
+          <RowDefinition Height="Auto"/>
+          <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+        <TextBlock Text="实时重置卡查询" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="13" FontWeight="SemiBold"/>
+        <CheckBox x:Name="LiveResetCreditsToggle" Grid.Row="1" Content="启用实时账户查询" Margin="0,16,0,0"
+                  Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11" Cursor="Hand"/>
+        <TextBlock Grid.Row="2" Text="开启后通过 Codex 本地 app-server 读取可用次数；不会读取对话内容或执行重置。"
+                   Foreground="{DynamicResource TextFaintBrush}" FontSize="10" TextWrapping="Wrap" Margin="0,8,0,0"/>
+        <TextBlock x:Name="LiveResetCreditsInfo" Grid.Row="3" Text="已关闭：继续使用本地状态快照"
+                   Foreground="{DynamicResource TextMutedBrush}" FontSize="10" TextWrapping="Wrap" Margin="0,14,0,0"/>
+      </Grid>
       <Button x:Name="ThemeToggleButton" Grid.Row="1" Content="◐" Width="24" Height="20"
               HorizontalAlignment="Left" VerticalAlignment="Bottom"
               Style="{StaticResource ThemeToggleButtonStyle}" ToolTip="切换到浅色主题" Panel.ZIndex="2"/>
@@ -312,11 +333,11 @@ $pythonPath = if (Test-Path -LiteralPath $bundledPython) {
 $reader = New-Object System.Xml.XmlNodeReader $xaml
 $window = [Windows.Markup.XamlReader]::Load($reader)
 $names = @(
-    'PanelBorder','Header','StatusTabButton','HistoryTabButton','StatusTabIndicator','HistoryTabIndicator','ThemeToggleButton','CloseButton','StatusView','HistoryView',
+    'PanelBorder','Header','StatusTabButton','HistoryTabButton','SettingsTabButton','StatusTabIndicator','HistoryTabIndicator','SettingsTabIndicator','ThemeToggleButton','CloseButton','StatusView','HistoryView','SettingsView',
     'ThreadTitle','ThreadMeta','ContextText','ContextBar','ContextDetail','FiveHourText','FiveHourBar',
-    'FiveHourReset','WeekText','WeekBar','WeekReset','StatusText','HistoryInstalledText','HistoryStartDate',
+    'FiveHourReset','WeekLabel','WeekText','WeekBar','WeekReset','StatusText','HistoryInstalledText','HistoryStartDate',
     'HistoryEndDate','HistoryApplyButton','HistoryTotalText','HistoryInputText','HistoryCachedText',
-    'HistoryOutputText','HistoryReasoningText','HistoryMetaText','EdgeIndicator','EdgeIndicatorFill'
+    'HistoryOutputText','HistoryReasoningText','HistoryMetaText','LiveResetCreditsToggle','LiveResetCreditsInfo','EdgeIndicator','EdgeIndicatorFill'
 )
 foreach ($name in $names) {
     Set-Variable -Name $name -Value $window.FindName($name) -Scope Script
@@ -329,6 +350,7 @@ $script:IsLightTheme = $false
 $script:HistoryCalendarEntered = @{}
 $script:HistoryAutoHideCalendars = @{}
 $script:HistoryDatePickerWasOpen = @{}
+$script:LiveResetCreditsEnabled = $false
 
 function Set-ThemeBrush([string]$key, [string]$color) {
     $window.Resources[$key] = [Windows.Media.BrushConverter]::new().ConvertFromString($color)
@@ -388,9 +410,15 @@ function Set-PanelTheme([bool]$useLightTheme) {
     if ($HistoryView.Visibility -eq 'Visible') {
         $StatusTabButton.Foreground = $mutedBrush
         $HistoryTabButton.Foreground = $primaryBrush
+        $SettingsTabButton.Foreground = $mutedBrush
+    } elseif ($SettingsView.Visibility -eq 'Visible') {
+        $StatusTabButton.Foreground = $mutedBrush
+        $HistoryTabButton.Foreground = $mutedBrush
+        $SettingsTabButton.Foreground = $primaryBrush
     } else {
         $StatusTabButton.Foreground = $primaryBrush
         $HistoryTabButton.Foreground = $mutedBrush
+        $SettingsTabButton.Foreground = $mutedBrush
     }
 }
 
@@ -408,10 +436,11 @@ function Save-OverlaySettings {
         [void][IO.Directory]::CreateDirectory($settingsDirectory)
         $left = if ($null -ne $script:DockSide) { Get-DockedLeft $false } else { [double]$window.Left }
         $settings = [ordered]@{
-            version = 1
+            version = 2
             left = [Math]::Round($left, 2)
             top = [Math]::Round([double]$window.Top, 2)
             is_light_theme = [bool]$script:IsLightTheme
+            live_reset_credits_enabled = [bool]$script:LiveResetCreditsEnabled
         }
         $json = $settings | ConvertTo-Json
         [IO.File]::WriteAllText($settingsPath, $json, [Text.UTF8Encoding]::new($false))
@@ -442,6 +471,9 @@ function Read-CodexStatus {
     if ($null -ne $script:HistoryStartEpoch -and $null -ne $script:HistoryEndEpoch) {
         $arguments += ' --history-start ' + ([int64]$script:HistoryStartEpoch)
         $arguments += ' --history-end ' + ([int64]$script:HistoryEndEpoch)
+    }
+    if ($script:LiveResetCreditsEnabled) {
+        $arguments += ' --read-live-reset-credits'
     }
     $startInfo.Arguments = $arguments
     $startInfo.UseShellExecute = $false
@@ -621,6 +653,32 @@ function Update-Limit($limit, $text, $bar, $reset) {
     $reset.Text = Format-ResetTime $limit.resets_at
 }
 
+function Get-ResetCreditCount($value) {
+    if ($null -eq $value) { return 0 }
+    try {
+        return [Math]::Max(0, [int64]$value)
+    } catch {
+        return 0
+    }
+}
+
+function Update-LiveResetCreditsInfo($data) {
+    if (-not $script:LiveResetCreditsEnabled) {
+        $LiveResetCreditsInfo.Text = '已关闭：继续使用本地状态快照'
+        return
+    }
+    if ($data.reset_credits_source -eq 'live_account') {
+        $LiveResetCreditsInfo.Text = ('已启用：实时账户查询成功，当前有 {0} 次重置' -f (Get-ResetCreditCount $data.reset_credits))
+        return
+    }
+    $error = [string]$data.live_reset_credits_error
+    $LiveResetCreditsInfo.Text = if ([string]::IsNullOrWhiteSpace($error)) {
+        '实时账户查询暂不可用；未使用本地次数替代。'
+    } else {
+        '实时账户查询暂不可用：' + $error
+    }
+}
+
 function Update-Panel {
     try {
         $data = Read-CodexStatus
@@ -648,8 +706,14 @@ function Update-Panel {
         $fiveHour = $data.limits | Where-Object { $_.window_minutes -eq 300 } | Select-Object -First 1
         $week = $data.limits | Where-Object { $_.window_minutes -eq 10080 } | Select-Object -First 1
         Update-Limit $fiveHour $FiveHourText $FiveHourBar $FiveHourReset
+        if ($data.reset_credits_source -eq 'live_account_unavailable') {
+            $WeekLabel.Text = '一周限额（重置次数不可用）'
+        } else {
+            $WeekLabel.Text = ('一周限额（有{0}次重置）' -f (Get-ResetCreditCount $data.reset_credits))
+        }
         Update-Limit $week $WeekText $WeekBar $WeekReset
         Update-HistoryView $data.history $data.history_error
+        Update-LiveResetCreditsInfo $data
         $selectionLabel = if ($data.thread.selection_source -in @('desktop_activity_log','window_accessibility')) { '随点击更新' } else { '最近任务回退' }
         $StatusText.Text = $selectionLabel + ' · ' + (Get-Date).ToString('HH:mm:ss')
     } catch {
@@ -663,18 +727,35 @@ function Set-PanelView([string]$viewName) {
     if ($viewName -eq 'History') {
         $StatusView.Visibility = 'Collapsed'
         $HistoryView.Visibility = 'Visible'
+        $SettingsView.Visibility = 'Collapsed'
         $StatusTabButton.Foreground = $window.Resources['TextMutedBrush']
         $HistoryTabButton.Foreground = $window.Resources['TextPrimaryBrush']
+        $SettingsTabButton.Foreground = $window.Resources['TextMutedBrush']
         $StatusTabIndicator.Visibility = 'Collapsed'
         $HistoryTabIndicator.Visibility = 'Visible'
+        $SettingsTabIndicator.Visibility = 'Collapsed'
+        $window.Height = 336
+    } elseif ($viewName -eq 'Settings') {
+        $StatusView.Visibility = 'Collapsed'
+        $HistoryView.Visibility = 'Collapsed'
+        $SettingsView.Visibility = 'Visible'
+        $StatusTabButton.Foreground = $window.Resources['TextMutedBrush']
+        $HistoryTabButton.Foreground = $window.Resources['TextMutedBrush']
+        $SettingsTabButton.Foreground = $window.Resources['TextPrimaryBrush']
+        $StatusTabIndicator.Visibility = 'Collapsed'
+        $HistoryTabIndicator.Visibility = 'Collapsed'
+        $SettingsTabIndicator.Visibility = 'Visible'
         $window.Height = 336
     } else {
         $StatusView.Visibility = 'Visible'
         $HistoryView.Visibility = 'Collapsed'
+        $SettingsView.Visibility = 'Collapsed'
         $StatusTabButton.Foreground = $window.Resources['TextPrimaryBrush']
         $HistoryTabButton.Foreground = $window.Resources['TextMutedBrush']
+        $SettingsTabButton.Foreground = $window.Resources['TextMutedBrush']
         $StatusTabIndicator.Visibility = 'Visible'
         $HistoryTabIndicator.Visibility = 'Collapsed'
+        $SettingsTabIndicator.Visibility = 'Collapsed'
         $window.Height = 336
     }
     $window.Top = [Math]::Max($workArea.Top, [Math]::Min($oldBottom - $window.Height, $workArea.Bottom - $window.Height))
@@ -805,6 +886,12 @@ $Header.Add_MouseLeftButtonDown({
 })
 $StatusTabButton.Add_Click({ Set-PanelView 'Status' })
 $HistoryTabButton.Add_Click({ Set-PanelView 'History' })
+$SettingsTabButton.Add_Click({ Set-PanelView 'Settings' })
+$LiveResetCreditsToggle.Add_Click({
+    $script:LiveResetCreditsEnabled = [bool]$LiveResetCreditsToggle.IsChecked
+    Save-OverlaySettings
+    Update-Panel
+})
 $ThemeToggleButton.Add_Click({
     Set-PanelTheme (-not $script:IsLightTheme)
     Save-OverlaySettings
@@ -868,6 +955,9 @@ $window.Add_Loaded({
             if ($settings.PSObject.Properties.Name -contains 'is_light_theme') {
                 Set-PanelTheme ([bool]$settings.is_light_theme)
             }
+            if ($settings.PSObject.Properties.Name -contains 'live_reset_credits_enabled') {
+                $script:LiveResetCreditsEnabled = [bool]$settings.live_reset_credits_enabled
+            }
         } catch {
             $savedLeft = $defaultLeft
             $savedTop = $defaultTop
@@ -877,6 +967,7 @@ $window.Add_Loaded({
     if ([double]::IsNaN($savedTop) -or [double]::IsInfinity($savedTop)) { $savedTop = $defaultTop }
     $window.Left = [Math]::Max($workArea.Left, [Math]::Min($savedLeft, $workArea.Right - $window.Width))
     $window.Top = [Math]::Max($workArea.Top, [Math]::Min($savedTop, $workArea.Bottom - $window.Height))
+    $LiveResetCreditsToggle.IsChecked = $script:LiveResetCreditsEnabled
     Update-Panel
     Update-DockState
     if ($null -ne $script:DockSide -and -not $window.IsMouseOver) { $hideTimer.Start() }

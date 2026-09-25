@@ -13,6 +13,8 @@
 - 上下文占用来自该任务最新的 `token_count.info.last_token_usage`；
 - 上限来自同一事件的 `model_context_window`；
 - 5 小时与一周限额是账户级数据，始终来自所有普通任务中时间最新且包含限额的 `token_count.rate_limits`；切换到旧对话时不会回退到该对话最后活动时的旧限额。
+- 默认情况下，一周限额标题后的重置次数来自同一快照的 `rate_limits.credits.balance`；没有重置卡或该字段不可用时显示 0。
+- 在“设置”页启用实时账户查询后，重置次数改为通过 Codex 本地 app-server 的只读 `account/rateLimits/read` 接口读取 `rateLimitResetCredits.availableCount`。它不会读取对话内容或消耗重置卡；接口不可用时显示“重置次数不可用”，而非 0。
 
 标题栏的“历史用量”页会从安装时刻开始累计本机 Codex 的 Token 用量。选择开始日期和结束日期后点击“查询”，可查看该自然日范围内的总 Token、输入、缓存输入、输出、推理输出和模型调用次数。安装时已有的历史会话不会被倒算；数据库保存在 `%LOCALAPPDATA%\CodexStatusPanel\usage-history.sqlite`，升级或重新运行安装脚本会沿用原记录。
 
