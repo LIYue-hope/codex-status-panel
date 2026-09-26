@@ -558,31 +558,39 @@ def parse_arguments(argv=None):
     parser.add_argument("--history-start", type=float)
     parser.add_argument("--history-end", type=float)
     parser.add_argument("--read-live-reset-credits", action="store_true")
+    parser.add_argument(
+        "--skip-history",
+        action="store_true",
+        help="Skip history database synchronization for this lightweight status poll.",
+    )
     return parser.parse_args(argv)
 
 
 def main(argv=None):
     args = parse_arguments(argv)
+    if args.initialize_history:
+        args.skip_history = False
     codex_home = Path(os.environ.get("CODEX_HOME") or (Path.home() / ".codex"))
     history = None
     history_error = None
     history_path = None
-    try:
-        history_connection, history_path, installed_at, history_created = open_history_database(codex_home)
+    if not args.skip_history:
         try:
-            imported_events = sync_usage_history(history_connection, codex_home, installed_at)
-            history = usage_history_summary(
-                history_connection,
-                installed_at,
-                args.history_start,
-                args.history_end,
-            )
-        finally:
-            history_connection.close()
-    except (OSError, sqlite3.Error, ValueError) as error:
-        history_created = False
-        imported_events = 0
-        history_error = str(error)
+            history_connection, history_path, installed_at, history_created = open_history_database(codex_home)
+            try:
+                imported_events = sync_usage_history(history_connection, codex_home, installed_at)
+                history = usage_history_summary(
+                    history_connection,
+                    installed_at,
+                    args.history_start,
+                    args.history_end,
+                )
+            finally:
+                history_connection.close()
+        except (OSError, sqlite3.Error, ValueError) as error:
+            history_created = False
+            imported_events = 0
+            history_error = str(error)
 
     if args.initialize_history:
         if history_error:

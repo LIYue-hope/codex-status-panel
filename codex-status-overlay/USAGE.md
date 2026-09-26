@@ -16,7 +16,7 @@
 - 默认情况下，一周限额标题后的重置次数来自同一快照的 `rate_limits.credits.balance`；没有重置卡或该字段不可用时显示 0。
 - 在“设置”页启用实时账户查询后，重置次数改为通过 Codex 本地 app-server 的只读 `account/rateLimits/read` 接口读取 `rateLimitResetCredits.availableCount`。它不会读取对话内容或消耗重置卡；接口不可用时显示“重置次数不可用”，而非 0。
 
-标题栏的“历史用量”页会从安装时刻开始累计本机 Codex 的 Token 用量。选择开始日期和结束日期后点击“查询”，可查看该自然日范围内的总 Token、输入、缓存输入、输出、推理输出和模型调用次数。安装时已有的历史会话不会被倒算；数据库保存在 `%LOCALAPPDATA%\CodexStatusPanel\usage-history.sqlite`，升级或重新运行安装脚本会沿用原记录。
+标题栏的“历史用量”页会从安装时刻开始累计本机 Codex 的 Token 用量。后台每 30 秒同步一次；切换到历史页或点击“查询”会立即发起一次同步。选择开始日期和结束日期后点击“查询”，可查看该自然日范围内的总 Token、输入、缓存输入、输出和推理输出及模型调用次数。安装时已有的历史会话不会被倒算；数据库保存在 `%LOCALAPPDATA%\CodexStatusPanel\usage-history.sqlite`，升级或重新运行安装脚本会沿用原记录。
 
 它不会读取或展示消息正文，也不会修改 Codex 数据。历史功能只增量读取 `token_count` 元数据并写入自己的本地数据库。任务切换通常会在 2 秒内反映；新任务需要至少完成一次模型响应后才会出现上下文和限额数据。
 

@@ -351,6 +351,10 @@ $script:HistoryCalendarEntered = @{}
 $script:HistoryAutoHideCalendars = @{}
 $script:HistoryDatePickerWasOpen = @{}
 $script:LiveResetCreditsEnabled = $false
+$script:StatusReadProcess = $null
+$script:NextStatusReadAt = [DateTime]::MinValue
+$script:LastHistoryReadAt = [DateTime]::MinValue
+$script:HistoryRefreshRequested = $false
 
 function Set-ThemeBrush([string]$key, [string]$color) {
     $window.Resources[$key] = [Windows.Media.BrushConverter]::new().ConvertFromString($color)
@@ -464,13 +468,18 @@ function Format-ResetTime($epoch) {
     }
 }
 
-function Read-CodexStatus {
+function Start-CodexStatusRead([bool]$includeHistory) {
+    if ($null -ne $script:StatusReadProcess) { return }
+
     $startInfo = New-Object System.Diagnostics.ProcessStartInfo
     $startInfo.FileName = $pythonPath
     $arguments = '"' + $providerPath + '"'
-    if ($null -ne $script:HistoryStartEpoch -and $null -ne $script:HistoryEndEpoch) {
+    if ($includeHistory -and $null -ne $script:HistoryStartEpoch -and $null -ne $script:HistoryEndEpoch) {
         $arguments += ' --history-start ' + ([int64]$script:HistoryStartEpoch)
         $arguments += ' --history-end ' + ([int64]$script:HistoryEndEpoch)
+    }
+    if (-not $includeHistory) {
+        $arguments += ' --skip-history'
     }
     if ($script:LiveResetCreditsEnabled) {
         $arguments += ' --read-live-reset-credits'
@@ -487,13 +496,37 @@ function Read-CodexStatus {
     $process = New-Object System.Diagnostics.Process
     $process.StartInfo = $startInfo
     [void]$process.Start()
+    $script:StatusReadProcess = $process
+}
+
+function Complete-CodexStatusRead {
+    $process = $script:StatusReadProcess
+    if ($null -eq $process -or -not $process.HasExited) { return $null }
+
+    $script:StatusReadProcess = $null
     $json = $process.StandardOutput.ReadToEnd()
     $errorText = $process.StandardError.ReadToEnd()
-    $process.WaitForExit(5000) | Out-Null
-    if ($process.ExitCode -ne 0 -and [string]::IsNullOrWhiteSpace($json)) {
-        throw $errorText
+    try {
+        if ($process.ExitCode -ne 0 -and [string]::IsNullOrWhiteSpace($json)) {
+            throw $errorText
+        }
+        return $json | ConvertFrom-Json
+    } finally {
+        $process.Dispose()
     }
-    return $json | ConvertFrom-Json
+}
+
+function Stop-CodexStatusRead {
+    $process = $script:StatusReadProcess
+    $script:StatusReadProcess = $null
+    if ($null -eq $process) { return }
+    try {
+        if (-not $process.HasExited) { $process.Kill() }
+    } catch {
+        # The read process may have exited between the check and Kill().
+    } finally {
+        $process.Dispose()
+    }
 }
 
 function Format-TokenCount([int64]$value) {
@@ -679,9 +712,7 @@ function Update-LiveResetCreditsInfo($data) {
     }
 }
 
-function Update-Panel {
-    try {
-        $data = Read-CodexStatus
+function Apply-CodexStatus($data) {
         if (-not $data.ok) { throw $data.error }
 
         $ThreadTitle.Text = [string]$data.thread.title
@@ -712,12 +743,36 @@ function Update-Panel {
             $WeekLabel.Text = ('一周限额（有{0}次重置）' -f (Get-ResetCreditCount $data.reset_credits))
         }
         Update-Limit $week $WeekText $WeekBar $WeekReset
-        Update-HistoryView $data.history $data.history_error
+        if ($null -ne $data.history -or $null -ne $data.history_error) {
+            Update-HistoryView $data.history $data.history_error
+        }
         Update-LiveResetCreditsInfo $data
         $selectionLabel = if ($data.thread.selection_source -in @('desktop_activity_log','window_accessibility')) { '随点击更新' } else { '最近任务回退' }
         $StatusText.Text = $selectionLabel + ' · ' + (Get-Date).ToString('HH:mm:ss')
+}
+
+function Update-Panel {
+    try {
+        $data = Complete-CodexStatusRead
+        if ($null -ne $data) { Apply-CodexStatus $data }
     } catch {
         $StatusText.Text = '读取失败：' + $_.Exception.Message
+    }
+
+    $now = [DateTime]::UtcNow
+    if ($null -eq $script:StatusReadProcess -and ($now -ge $script:NextStatusReadAt -or $script:HistoryRefreshRequested)) {
+        $includeHistory = $script:HistoryRefreshRequested -or (($now - $script:LastHistoryReadAt).TotalSeconds -ge 30)
+        try {
+            Start-CodexStatusRead $includeHistory
+            $script:NextStatusReadAt = $now.AddSeconds([Math]::Max(1, $RefreshSeconds))
+            if ($includeHistory) {
+                $script:LastHistoryReadAt = $now
+                $script:HistoryRefreshRequested = $false
+            }
+        } catch {
+            $StatusText.Text = '启动读取失败：' + $_.Exception.Message
+            $script:NextStatusReadAt = $now.AddSeconds([Math]::Max(1, $RefreshSeconds))
+        }
     }
 }
 
@@ -725,6 +780,7 @@ function Set-PanelView([string]$viewName) {
     $workArea = [System.Windows.SystemParameters]::WorkArea
     $oldBottom = if ([double]::IsNaN([double]$window.Top)) { $workArea.Bottom - 18 } else { $window.Top + $window.Height }
     if ($viewName -eq 'History') {
+        $script:HistoryRefreshRequested = $true
         $StatusView.Visibility = 'Collapsed'
         $HistoryView.Visibility = 'Visible'
         $SettingsView.Visibility = 'Collapsed'
@@ -889,6 +945,7 @@ $HistoryTabButton.Add_Click({ Set-PanelView 'History' })
 $SettingsTabButton.Add_Click({ Set-PanelView 'Settings' })
 $LiveResetCreditsToggle.Add_Click({
     $script:LiveResetCreditsEnabled = [bool]$LiveResetCreditsToggle.IsChecked
+    $script:NextStatusReadAt = [DateTime]::MinValue
     Save-OverlaySettings
     Update-Panel
 })
@@ -917,7 +974,10 @@ $HistoryEndDate.Add_PreviewMouseLeftButtonUp({
     if (Complete-HistoryDatePickerTextClick $HistoryEndDate) { $eventArgs.Handled = $true }
 })
 $HistoryApplyButton.Add_Click({
-    if (Apply-HistoryDateRange) { Update-Panel }
+    if (Apply-HistoryDateRange) {
+        $script:HistoryRefreshRequested = $true
+        Update-Panel
+    }
 })
 $CloseButton.Add_Click({ $window.Close() })
 $window.Add_PreviewMouseLeftButtonDown({
@@ -974,10 +1034,10 @@ $window.Add_Loaded({
 })
 
 $timer = New-Object Windows.Threading.DispatcherTimer
-$timer.Interval = [TimeSpan]::FromSeconds([Math]::Max(1, $RefreshSeconds))
+$timer.Interval = [TimeSpan]::FromMilliseconds(250)
 $timer.Add_Tick({ Update-Panel })
 $timer.Start()
-$window.Add_Closed({ Save-OverlaySettings; $timer.Stop(); $hideTimer.Stop(); Stop-SlideAnimation })
+$window.Add_Closed({ Save-OverlaySettings; $timer.Stop(); $hideTimer.Stop(); Stop-SlideAnimation; Stop-CodexStatusRead })
 
 try {
     [void]$window.ShowDialog()
