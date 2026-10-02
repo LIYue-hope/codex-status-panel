@@ -576,6 +576,22 @@ function Hide-HistoryDatePickerButton($datePicker) {
     }
 }
 
+function Test-HistoryDatePickerClick($datePicker, $originalSource) {
+    $textBox = $datePicker.Template.FindName('PART_TextBox', $datePicker)
+    $popup = $datePicker.Template.FindName('PART_Popup', $datePicker)
+    foreach ($root in @($textBox, $(if ($null -ne $popup) { $popup.Child }))) {
+        if ($null -eq $root) { continue }
+        if ($root.IsMouseOver) { return $true }
+        # Popup input can route through its DatePicker to the window. Treat its
+        # visual descendants (including month arrows) as inside clicks too.
+        if ($originalSource -is [Windows.Media.Visual] -and
+            ($root -eq $originalSource -or $root.IsAncestorOf($originalSource))) {
+            return $true
+        }
+    }
+    return $false
+}
+
 function Find-VisualDescendantByType($root, [Type]$targetType) {
     if ($null -eq $root) { return $null }
     if ($targetType.IsInstanceOfType($root)) { return $root }
@@ -982,11 +998,9 @@ $HistoryApplyButton.Add_Click({
 $CloseButton.Add_Click({ $window.Close() })
 $window.Add_PreviewMouseLeftButtonDown({
     param($sender, $eventArgs)
-    $startTextBox = $HistoryStartDate.Template.FindName('PART_TextBox', $HistoryStartDate)
-    $endTextBox = $HistoryEndDate.Template.FindName('PART_TextBox', $HistoryEndDate)
-    $isOverDateText = ($null -ne $startTextBox -and $startTextBox.IsMouseOver) -or
-                      ($null -ne $endTextBox -and $endTextBox.IsMouseOver)
-    if (-not $isOverDateText) {
+    $isInsideDatePicker = (Test-HistoryDatePickerClick $HistoryStartDate $eventArgs.OriginalSource) -or
+                         (Test-HistoryDatePickerClick $HistoryEndDate $eventArgs.OriginalSource)
+    if (-not $isInsideDatePicker) {
         $HistoryStartDate.IsDropDownOpen = $false
         $HistoryEndDate.IsDropDownOpen = $false
     }
