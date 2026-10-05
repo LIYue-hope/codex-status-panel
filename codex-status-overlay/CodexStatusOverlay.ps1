@@ -311,7 +311,7 @@ $pythonPath = if (Test-Path -LiteralPath $bundledPython) {
         <TextBlock Text="实时重置卡查询" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="13" FontWeight="SemiBold"/>
         <CheckBox x:Name="LiveResetCreditsToggle" Grid.Row="1" Content="启用实时账户查询" Margin="0,16,0,0"
                   Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11" Cursor="Hand"/>
-        <TextBlock Grid.Row="2" Text="开启后通过 Codex 本地 app-server 读取可用次数；不会读取对话内容或执行重置。"
+        <TextBlock Grid.Row="2" Text="开启后通过 Codex 本地 app-server 读取可用次数；关闭后保留最近一次成功查询结果，再次开启时刷新。不会读取对话内容或执行重置。"
                    Foreground="{DynamicResource TextFaintBrush}" FontSize="10" TextWrapping="Wrap" Margin="0,8,0,0"/>
         <TextBlock x:Name="LiveResetCreditsInfo" Grid.Row="3" Text="已关闭：继续使用本地状态快照"
                    Foreground="{DynamicResource TextMutedBrush}" FontSize="10" TextWrapping="Wrap" Margin="0,14,0,0"/>
@@ -351,6 +351,7 @@ $script:HistoryCalendarEntered = @{}
 $script:HistoryAutoHideCalendars = @{}
 $script:HistoryDatePickerWasOpen = @{}
 $script:LiveResetCreditsEnabled = $false
+$script:LastLiveResetCreditCount = $null
 $script:StatusReadProcess = $null
 $script:NextStatusReadAt = [DateTime]::MinValue
 $script:LastHistoryReadAt = [DateTime]::MinValue
@@ -445,6 +446,7 @@ function Save-OverlaySettings {
             top = [Math]::Round([double]$window.Top, 2)
             is_light_theme = [bool]$script:IsLightTheme
             live_reset_credits_enabled = [bool]$script:LiveResetCreditsEnabled
+            last_live_reset_credit_count = $script:LastLiveResetCreditCount
         }
         $json = $settings | ConvertTo-Json
         [IO.File]::WriteAllText($settingsPath, $json, [Text.UTF8Encoding]::new($false))
@@ -713,7 +715,11 @@ function Get-ResetCreditCount($value) {
 
 function Update-LiveResetCreditsInfo($data) {
     if (-not $script:LiveResetCreditsEnabled) {
-        $LiveResetCreditsInfo.Text = '已关闭：继续使用本地状态快照'
+        $LiveResetCreditsInfo.Text = if ($null -ne $script:LastLiveResetCreditCount) {
+            '已关闭：保留最近查询的 {0} 次重置' -f $script:LastLiveResetCreditCount
+        } else {
+            '已关闭：继续使用本地状态快照'
+        }
         return
     }
     if ($data.reset_credits_source -eq 'live_account') {
@@ -721,6 +727,10 @@ function Update-LiveResetCreditsInfo($data) {
         return
     }
     $error = [string]$data.live_reset_credits_error
+    if ($null -ne $script:LastLiveResetCreditCount) {
+        $LiveResetCreditsInfo.Text = '本次查询暂不可用；保留最近查询的 {0} 次重置。{1}' -f $script:LastLiveResetCreditCount, $error
+        return
+    }
     $LiveResetCreditsInfo.Text = if ([string]::IsNullOrWhiteSpace($error)) {
         '实时账户查询暂不可用；未使用本地次数替代。'
     } else {
@@ -753,10 +763,23 @@ function Apply-CodexStatus($data) {
         $fiveHour = $data.limits | Where-Object { $_.window_minutes -eq 300 } | Select-Object -First 1
         $week = $data.limits | Where-Object { $_.window_minutes -eq 10080 } | Select-Object -First 1
         Update-Limit $fiveHour $FiveHourText $FiveHourBar $FiveHourReset
-        if ($data.reset_credits_source -eq 'live_account_unavailable') {
+        if ($data.reset_credits_source -eq 'live_account') {
+            $queriedCount = Get-ResetCreditCount $data.reset_credits
+            if ($null -eq $script:LastLiveResetCreditCount -or $script:LastLiveResetCreditCount -ne $queriedCount) {
+                $script:LastLiveResetCreditCount = $queriedCount
+                Save-OverlaySettings
+            }
+        }
+        $displayResetCount = Get-ResetCreditCount $data.reset_credits
+        $displayResetSource = [string]$data.reset_credits_source
+        if ($null -ne $script:LastLiveResetCreditCount) {
+            $displayResetCount = $script:LastLiveResetCreditCount
+            $displayResetSource = 'cached_live_account'
+        }
+        if ($displayResetSource -eq 'live_account_unavailable') {
             $WeekLabel.Text = '一周限额（重置次数不可用）'
         } else {
-            $WeekLabel.Text = ('一周限额（有{0}次重置）' -f (Get-ResetCreditCount $data.reset_credits))
+            $WeekLabel.Text = ('一周限额（有{0}次重置）' -f $displayResetCount)
         }
         Update-Limit $week $WeekText $WeekBar $WeekReset
         if ($null -ne $data.history -or $null -ne $data.history_error) {
@@ -961,6 +984,7 @@ $HistoryTabButton.Add_Click({ Set-PanelView 'History' })
 $SettingsTabButton.Add_Click({ Set-PanelView 'Settings' })
 $LiveResetCreditsToggle.Add_Click({
     $script:LiveResetCreditsEnabled = [bool]$LiveResetCreditsToggle.IsChecked
+    if (-not $script:LiveResetCreditsEnabled) { Stop-CodexStatusRead }
     $script:NextStatusReadAt = [DateTime]::MinValue
     Save-OverlaySettings
     Update-Panel
@@ -1031,6 +1055,13 @@ $window.Add_Loaded({
             }
             if ($settings.PSObject.Properties.Name -contains 'live_reset_credits_enabled') {
                 $script:LiveResetCreditsEnabled = [bool]$settings.live_reset_credits_enabled
+            }
+            if ($settings.PSObject.Properties.Name -contains 'last_live_reset_credit_count' -and $null -ne $settings.last_live_reset_credit_count) {
+                try {
+                    $script:LastLiveResetCreditCount = [Math]::Max(0, [int64]$settings.last_live_reset_credit_count)
+                } catch {
+                    $script:LastLiveResetCreditCount = $null
+                }
             }
         } catch {
             $savedLeft = $defaultLeft
