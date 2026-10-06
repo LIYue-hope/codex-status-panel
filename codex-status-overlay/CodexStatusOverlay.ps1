@@ -16,6 +16,12 @@ if (-not $createdNew) {
 
 $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $providerPath = Join-Path $scriptRoot 'read_status.py'
+$streamSpeedPath = Join-Path $scriptRoot 'stream_speed.py'
+$script:SpeedProcess = $null
+$script:SpeedReadTask = $null
+$script:SpeedThreadId = $null
+$script:NextSpeedStart = [DateTime]::MinValue
+$script:LastSpeedAt = [DateTime]::MinValue
 $settingsDirectory = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'CodexStatusPanel'
 $settingsPath = Join-Path $settingsDirectory 'overlay-settings.json'
 $bundledPython = Join-Path $env:USERPROFILE '.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe'
@@ -54,6 +60,11 @@ $pythonPath = if (Test-Path -LiteralPath $bundledPython) {
     <SolidColorBrush x:Key="TotalBackgroundBrush" Color="#182FAE8F"/>
     <SolidColorBrush x:Key="TotalBorderBrush" Color="#343FC3A0"/>
     <SolidColorBrush x:Key="ThemeToggleHoverBrush" Color="#262F3741"/>
+    <Style x:Key="ThreadMetadataStyle" TargetType="TextBlock">
+      <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}"/>
+      <Setter Property="FontSize" Value="11"/>
+      <Setter Property="FontWeight" Value="Normal"/>
+    </Style>
     <Style x:Key="PanelTabButtonStyle" TargetType="Button">
       <Setter Property="Background" Value="Transparent"/>
       <Setter Property="BorderThickness" Value="0"/>
@@ -200,9 +211,17 @@ $pythonPath = if (Test-Path -LiteralPath $bundledPython) {
           <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
         <StackPanel Grid.Row="0" Margin="0,3,0,0">
-          <TextBlock x:Name="ThreadTitle" Text="正在读取当前任务…" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="13"
-                     FontWeight="SemiBold" TextTrimming="CharacterEllipsis" ToolTip=""/>
-          <TextBlock x:Name="ThreadMeta" Text="" Foreground="{DynamicResource TextMutedBrush}" FontSize="11" Margin="0,6,0,0" TextTrimming="CharacterEllipsis"/>
+          <Grid>
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="*"/>
+              <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            <TextBlock x:Name="ThreadTitle" Text="正在读取当前任务…" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="13"
+                       FontWeight="SemiBold" TextTrimming="CharacterEllipsis" ToolTip=""/>
+            <TextBlock x:Name="OutputSpeed" Grid.Column="1" Text="输出：等待数据" Margin="8,0,0,0" VerticalAlignment="Center"
+                       Style="{StaticResource ThreadMetadataStyle}"/>
+          </Grid>
+          <TextBlock x:Name="ThreadMeta" Text="" Style="{StaticResource ThreadMetadataStyle}" Margin="0,6,0,0" TextTrimming="CharacterEllipsis"/>
         </StackPanel>
         <StackPanel Grid.Row="1">
           <DockPanel>
@@ -334,7 +353,7 @@ $reader = New-Object System.Xml.XmlNodeReader $xaml
 $window = [Windows.Markup.XamlReader]::Load($reader)
 $names = @(
     'PanelBorder','Header','StatusTabButton','HistoryTabButton','SettingsTabButton','StatusTabIndicator','HistoryTabIndicator','SettingsTabIndicator','ThemeToggleButton','CloseButton','StatusView','HistoryView','SettingsView',
-    'ThreadTitle','ThreadMeta','ContextText','ContextBar','ContextDetail','FiveHourText','FiveHourBar',
+    'ThreadTitle','ThreadMeta','OutputSpeed','ContextText','ContextBar','ContextDetail','FiveHourText','FiveHourBar',
     'FiveHourReset','WeekLabel','WeekText','WeekBar','WeekReset','StatusText','HistoryInstalledText','HistoryStartDate',
     'HistoryEndDate','HistoryApplyButton','HistoryTotalText','HistoryInputText','HistoryCachedText',
     'HistoryOutputText','HistoryReasoningText','HistoryMetaText','LiveResetCreditsToggle','LiveResetCreditsInfo','EdgeIndicator','EdgeIndicatorFill'
@@ -744,6 +763,11 @@ function Apply-CodexStatus($data) {
         $ThreadTitle.Text = [string]$data.thread.title
         $ThreadTitle.ToolTip = [string]$data.thread.title
         $ThreadMeta.Text = ([string]$data.thread.model) + '  ·  ' + ([string]$data.thread.id).Substring(0, 8)
+        if ($script:SpeedThreadId -ne [string]$data.thread.id) {
+            $OutputSpeed.Text = '输出：连接中'
+            $script:SpeedThreadId = [string]$data.thread.id
+        }
+        $OutputSpeed.ToolTip = '当前对话可见文本的近 5 秒流式速度；使用公开 o200k_base 分词估算（≈），不含隐藏推理或工具输出。'
 
         if ($null -ne $data.context) {
             $percent = [double]$data.context.percent
@@ -790,7 +814,71 @@ function Apply-CodexStatus($data) {
         $StatusText.Text = $selectionLabel + ' · ' + (Get-Date).ToString('HH:mm:ss')
 }
 
+function Stop-StreamSpeed {
+    if ($null -ne $script:SpeedProcess) {
+        try { if (-not $script:SpeedProcess.HasExited) { $script:SpeedProcess.Kill() } } catch { }
+        $script:SpeedProcess.Dispose()
+    }
+    $script:SpeedProcess = $null
+    $script:SpeedReadTask = $null
+}
+
+function Update-StreamSpeed {
+    $now = [DateTime]::UtcNow
+    try {
+        if ($null -ne $script:SpeedProcess -and $script:SpeedProcess.HasExited) {
+            Stop-StreamSpeed
+            $script:NextSpeedStart = $now.AddSeconds(10)
+            $OutputSpeed.Text = '输出：流式不可用'
+        }
+        if ($null -eq $script:SpeedProcess -and $now -ge $script:NextSpeedStart) {
+            $info = [System.Diagnostics.ProcessStartInfo]::new()
+            $info.FileName = $pythonPath
+            $info.Arguments = '"' + $streamSpeedPath + '" --parent-pid ' + $PID
+            $info.UseShellExecute = $false
+            $info.CreateNoWindow = $true
+            $info.RedirectStandardOutput = $true
+            $info.RedirectStandardError = $true
+            $info.StandardOutputEncoding = [System.Text.UTF8Encoding]::new($false)
+            $script:SpeedProcess = [System.Diagnostics.Process]::new()
+            $script:SpeedProcess.StartInfo = $info
+            [void]$script:SpeedProcess.Start()
+            $script:SpeedProcess.BeginErrorReadLine()
+            $script:SpeedReadTask = $script:SpeedProcess.StandardOutput.ReadLineAsync()
+            $script:LastSpeedAt = $now
+        }
+        $linesRead = 0
+        while ($null -ne $script:SpeedReadTask -and $script:SpeedReadTask.IsCompleted -and $linesRead -lt 20) {
+            $line = $script:SpeedReadTask.GetAwaiter().GetResult()
+            if ($null -eq $line) { break }
+            $metric = $line | ConvertFrom-Json
+            $script:LastSpeedAt = $now
+            if ($metric.thread_id -eq $script:SpeedThreadId -or $null -eq $metric.thread_id) {
+                $OutputSpeed.Text = switch ($metric.status) {
+                    'streaming' { '≈ {0:0.0} token/s' -f [double]$metric.tokens_per_second }
+                    'idle' { '输出：待机' }
+                    'warming' { '输出：采样中' }
+                    'connecting' { '输出：连接中' }
+                    default { '输出：流式不可用' }
+                }
+            }
+            $script:SpeedReadTask = $script:SpeedProcess.StandardOutput.ReadLineAsync()
+            $linesRead++
+        }
+        if ($null -ne $script:SpeedProcess -and ($now - $script:LastSpeedAt).TotalSeconds -gt 10) {
+            Stop-StreamSpeed
+            $script:NextSpeedStart = $now.AddSeconds(3)
+            $OutputSpeed.Text = '输出：流式不可用'
+        }
+    } catch {
+        Stop-StreamSpeed
+        $script:NextSpeedStart = $now.AddSeconds(10)
+        $OutputSpeed.Text = '输出：流式不可用'
+    }
+}
+
 function Update-Panel {
+    Update-StreamSpeed
     try {
         $data = Complete-CodexStatusRead
         if ($null -ne $data) { Apply-CodexStatus $data }
@@ -1082,11 +1170,12 @@ $timer = New-Object Windows.Threading.DispatcherTimer
 $timer.Interval = [TimeSpan]::FromMilliseconds(250)
 $timer.Add_Tick({ Update-Panel })
 $timer.Start()
-$window.Add_Closed({ Save-OverlaySettings; $timer.Stop(); $hideTimer.Stop(); Stop-SlideAnimation; Stop-CodexStatusRead })
+$window.Add_Closed({ Save-OverlaySettings; $timer.Stop(); $hideTimer.Stop(); Stop-SlideAnimation; Stop-CodexStatusRead; Stop-StreamSpeed })
 
 try {
     [void]$window.ShowDialog()
 } finally {
+    Stop-StreamSpeed
     try { $singleInstanceMutex.ReleaseMutex() } catch { }
     $singleInstanceMutex.Dispose()
 }
