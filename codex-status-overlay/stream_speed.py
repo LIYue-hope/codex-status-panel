@@ -26,6 +26,7 @@ class SpeedMeter:
         self.last_text = None
         self.revision = None
         self.pending = {}
+        self.last_speed = None
 
     def remember(self, value, path=()):
         if isinstance(value, dict):
@@ -94,11 +95,15 @@ class SpeedMeter:
         while self.samples and now - self.samples[0][0] > 5:
             self.samples.popleft()
         if self.last_text is None or now - self.last_text > 3:
-            return {"status": "idle", "tokens_per_second": None}
+            return {"status": "idle", "tokens_per_second": self.last_speed}
         elapsed = min(5, now - self.started)
         if elapsed < 0.5:
-            return {"status": "warming", "tokens_per_second": None}
-        return {"status": "streaming", "tokens_per_second": round(max(0, sum(n for _, n in self.samples)) / elapsed, 1)}
+            return {"status": "warming", "tokens_per_second": self.last_speed}
+        speed = round(max(0, sum(n for _, n in self.samples)) / elapsed, 1)
+        # A tool pause must not gradually lower the last visible output speed.
+        if speed > 0 and (delta > 0 or self.last_speed is None):
+            self.last_speed = speed
+        return {"status": "streaming", "tokens_per_second": self.last_speed}
 
 
 def emit(thread_id, metric):

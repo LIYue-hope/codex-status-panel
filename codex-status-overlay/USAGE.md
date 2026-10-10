@@ -1,6 +1,6 @@
 # Codex Status Overlay
 
-实时输出速度需要 Python 的 `tiktoken` 依赖。使用运行悬浮窗的同一 Python 执行 `python -m pip install tiktoken --target codex-status-overlay/dependencies`（在仓库根目录运行）。仓库附带 `tokenizer-cache` 中的公开分词词表，监听器仅使用本地词表；缺少依赖时显示“流式不可用”。
+实时输出速度需要 Python 的 `tiktoken` 依赖。使用运行悬浮窗的同一 Python 执行 `python -m pip install tiktoken --target codex-status-overlay/dependencies`（在仓库根目录运行）。仓库附带 `tokenizer-cache` 中的公开分词词表，监听器仅使用本地词表；缺少依赖时保留最后有效速度，无有效数据则显示 `≈ 0.0 token/s`。
 
 双击 `Start-CodexStatusOverlay.cmd` 启动右下角悬浮面板，点击面板右上角的 `×` 退出。
 
@@ -13,7 +13,7 @@
 - 当前任务优先通过 Codex 桌面日志中的 `thread_stream_view_activity_changed active=true` 事件识别，并按任务 ID 映射到 `state_5.sqlite`；旧版客户端缺少该事件时再尝试窗口可访问性标题；
 - 用户点击不同对话后通常会在 2 秒内自动切换；两种当前任务信号均不可用时，才回退到最近活跃的普通用户任务；
 - 上下文占用来自该任务最新的 `token_count.info.last_token_usage`；
-- 对话名称右侧显示 `≈ xx.x token/s`，字体、字号和颜色沿用下方模型名称。通过 Windows `codex-ipc` 命名管道订阅当前对话的实时文本补丁，每 0.5 秒更新近 5 秒可见文本的输出速度；使用本地公开 `o200k_base` 分词，因此明确标为估算值，不是模型服务端精确计数，也不包含隐藏推理或工具输出。开始输出时显示“采样中”，3 秒未收到文本增量后显示“待机”。切换对话会清空采样；连接故障自动重试并显示“流式不可用”。正文只在内存处理，不保存到测速日志。监听器随面板退出，内部 IPC 协议变化时可能需要更新。
+- 对话名称右侧始终显示 `≈ xx.x token/s`，字体、字号和颜色沿用下方模型名称。通过 Windows `codex-ipc` 命名管道订阅当前对话的实时文本补丁，每 0.5 秒采样近 5 秒可见文本的输出速度；使用本地公开 `o200k_base` 分词，因此明确标为估算值，不是模型服务端精确计数，也不包含隐藏推理或工具输出。运行命令、暂停输出、采样不足、速度为 0 或连接故障时保留最后有效数值，恢复文本输出后继续更新。切换对话会清空采样并显示 `≈ 0.0 token/s`；连接故障自动重试。正文只在内存处理，不保存到测速日志。监听器随面板退出，内部 IPC 协议变化时可能需要更新。
 - 上限来自同一事件的 `model_context_window`；
 - 5 小时与一周限额是账户级数据，始终来自所有普通任务中时间最新且包含限额的 `token_count.rate_limits`；切换到旧对话时不会回退到该对话最后活动时的旧限额。
 - 默认情况下，一周限额标题后的重置次数来自同一快照的 `rate_limits.credits.balance`；没有重置卡或该字段不可用时显示 0。

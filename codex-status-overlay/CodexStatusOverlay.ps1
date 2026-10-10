@@ -218,7 +218,7 @@ $pythonPath = if (Test-Path -LiteralPath $bundledPython) {
             </Grid.ColumnDefinitions>
             <TextBlock x:Name="ThreadTitle" Text="正在读取当前任务…" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="13"
                        FontWeight="SemiBold" TextTrimming="CharacterEllipsis" ToolTip=""/>
-            <TextBlock x:Name="OutputSpeed" Grid.Column="1" Text="输出：等待数据" Margin="8,0,0,0" VerticalAlignment="Center"
+            <TextBlock x:Name="OutputSpeed" Grid.Column="1" Text="≈ 0.0 token/s" Margin="8,0,0,0" VerticalAlignment="Center"
                        Style="{StaticResource ThreadMetadataStyle}"/>
           </Grid>
           <TextBlock x:Name="ThreadMeta" Text="" Style="{StaticResource ThreadMetadataStyle}" Margin="0,6,0,0" TextTrimming="CharacterEllipsis"/>
@@ -764,10 +764,10 @@ function Apply-CodexStatus($data) {
         $ThreadTitle.ToolTip = [string]$data.thread.title
         $ThreadMeta.Text = ([string]$data.thread.model) + '  ·  ' + ([string]$data.thread.id).Substring(0, 8)
         if ($script:SpeedThreadId -ne [string]$data.thread.id) {
-            $OutputSpeed.Text = '输出：连接中'
+            $OutputSpeed.Text = '≈ 0.0 token/s'
             $script:SpeedThreadId = [string]$data.thread.id
         }
-        $OutputSpeed.ToolTip = '当前对话可见文本的近 5 秒流式速度；使用公开 o200k_base 分词估算（≈），不含隐藏推理或工具输出。'
+        $OutputSpeed.ToolTip = '当前对话可见文本的近 5 秒流式速度；无输出、运行命令或连接中断时保留最后有效数值。使用公开 o200k_base 分词估算（≈），不含隐藏推理或工具输出。'
 
         if ($null -ne $data.context) {
             $percent = [double]$data.context.percent
@@ -829,7 +829,6 @@ function Update-StreamSpeed {
         if ($null -ne $script:SpeedProcess -and $script:SpeedProcess.HasExited) {
             Stop-StreamSpeed
             $script:NextSpeedStart = $now.AddSeconds(10)
-            $OutputSpeed.Text = '输出：流式不可用'
         }
         if ($null -eq $script:SpeedProcess -and $now -ge $script:NextSpeedStart) {
             $info = [System.Diagnostics.ProcessStartInfo]::new()
@@ -854,12 +853,8 @@ function Update-StreamSpeed {
             $metric = $line | ConvertFrom-Json
             $script:LastSpeedAt = $now
             if ($metric.thread_id -eq $script:SpeedThreadId -or $null -eq $metric.thread_id) {
-                $OutputSpeed.Text = switch ($metric.status) {
-                    'streaming' { '≈ {0:0.0} token/s' -f [double]$metric.tokens_per_second }
-                    'idle' { '输出：待机' }
-                    'warming' { '输出：采样中' }
-                    'connecting' { '输出：连接中' }
-                    default { '输出：流式不可用' }
+                if ($metric.thread_id -eq $script:SpeedThreadId -and $null -ne $metric.tokens_per_second -and [double]$metric.tokens_per_second -gt 0) {
+                    $OutputSpeed.Text = '≈ {0:0.0} token/s' -f [double]$metric.tokens_per_second
                 }
             }
             $script:SpeedReadTask = $script:SpeedProcess.StandardOutput.ReadLineAsync()
@@ -868,12 +863,10 @@ function Update-StreamSpeed {
         if ($null -ne $script:SpeedProcess -and ($now - $script:LastSpeedAt).TotalSeconds -gt 10) {
             Stop-StreamSpeed
             $script:NextSpeedStart = $now.AddSeconds(3)
-            $OutputSpeed.Text = '输出：流式不可用'
         }
     } catch {
         Stop-StreamSpeed
         $script:NextSpeedStart = $now.AddSeconds(10)
-        $OutputSpeed.Text = '输出：流式不可用'
     }
 }
 

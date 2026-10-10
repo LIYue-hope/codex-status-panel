@@ -37,6 +37,18 @@ class SpeedMeterTests(unittest.TestCase):
         self.patch("oldabcdefgh", 3)
         self.assertEqual(self.meter.metric(3)["tokens_per_second"], 4)
         self.assertEqual(self.meter.metric(7)["status"], "idle")
+        self.assertEqual(self.meter.metric(7)["tokens_per_second"], 4)
+
+    def test_tool_pause_holds_speed_until_output_resumes(self):
+        self.patch("oldabcd", 1)
+        self.assertEqual(self.meter.metric(2)["tokens_per_second"], 4)
+        self.patch("tool output", 2.1, 1)
+        self.assertEqual(self.meter.metric(3)["tokens_per_second"], 4)
+        self.assertEqual(self.meter.metric(10)["tokens_per_second"], 4)
+        self.patch("oldabcdefghij", 11)
+        self.assertEqual(self.meter.metric(11)["tokens_per_second"], 4)
+        self.patch("oldabcdefghijkl", 12)
+        self.assertEqual(self.meter.metric(12)["tokens_per_second"], 8)
 
     def test_snapshot_resets_and_revision_gap_is_rejected(self):
         self.patch("oldabcd", 1)
